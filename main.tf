@@ -1,34 +1,51 @@
-# Task 1: Deploy an Azure Container Instance using a Docker image
+# Task 1: Create and configure an Azure Container App and environment
 
-# Використовуємо ту саму ресурсну групу, що й у попередній лабі
-resource "azurerm_resource_group" "rg9b" {
+# 1. Ресурсна група (якщо ти її видалила, вона створиться заново)
+resource "azurerm_resource_group" "rg9c" {
   name     = "az104-rg9"
   location = "East US"
 }
 
-# Генерація унікального суфікса для DNS-імені
-resource "random_id" "dns_suffix" {
-  byte_length = 4
+# 2. Log Analytics Workspace (необхідний для моніторингу середовища)
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "viktoriia-law"
+  location            = azurerm_resource_group.rg9c.location
+  resource_group_name = azurerm_resource_group.rg9c.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
 }
 
-# Створення Container Instance
-resource "azurerm_container_group" "aci1" {
-  name                = "az104-c1"
-  location            = azurerm_resource_group.rg9b.location
-  resource_group_name = azurerm_resource_group.rg9b.name
-  ip_address_type     = "Public"
-  dns_name_label      = "az104-viktoriia-${random_id.dns_suffix.hex}"
-  os_type             = "Linux"
+# 3. Container App Environment (Середовище my-environment)
+resource "azurerm_container_app_environment" "env" {
+  name                       = "my-environment"
+  location                   = azurerm_resource_group.rg9c.location
+  resource_group_name        = azurerm_resource_group.rg9c.name
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+}
 
-  container {
-    name   = "hello-world"
-    image  = "mcr.microsoft.com/azuredocs/aci-helloworld:latest"
-    cpu    = "0.5"
-    memory = "1.5"
+# 4. Container App (Застосунок my-app)
+resource "azurerm_container_app" "app" {
+  name                         = "my-app"
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  resource_group_name          = azurerm_resource_group.rg9c.name
+  revision_mode                = "Single"
 
-    ports {
-      port     = 80
-      protocol = "TCP"
+  template {
+    container {
+      name   = "hello-world-container"
+      image  = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
+    }
+  }
+
+  ingress {
+    allow_insecure_connections = false
+    external_enabled           = true
+    target_port                = 80
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
     }
   }
 }
