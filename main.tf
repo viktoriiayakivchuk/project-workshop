@@ -1,51 +1,121 @@
-# Task 1: Create and configure an Azure Container App and environment
-
-# 1. Ресурсна група (якщо ти її видалила, вона створиться заново)
-resource "azurerm_resource_group" "rg9c" {
-  name     = "az104-rg9"
-  location = "East US"
+resource "azurerm_resource_group" "rg11" {
+  name     = "az104-rg11"
+  location = "Sweden Central"
 }
 
-# 2. Log Analytics Workspace (необхідний для моніторингу середовища)
-resource "azurerm_log_analytics_workspace" "law" {
-  name                = "viktoriia-law"
-  location            = azurerm_resource_group.rg9c.location
-  resource_group_name = azurerm_resource_group.rg9c.name
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
+resource "azurerm_virtual_network" "vnet" {
+  name                = "az104-11-vnet"
+  address_space       = ["10.11.0.0/16"]
+  location            = azurerm_resource_group.rg11.location
+  resource_group_name = azurerm_resource_group.rg11.name
 }
 
-# 3. Container App Environment (Середовище my-environment)
-resource "azurerm_container_app_environment" "env" {
-  name                       = "my-environment"
-  location                   = azurerm_resource_group.rg9c.location
-  resource_group_name        = azurerm_resource_group.rg9c.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+resource "azurerm_subnet" "subnet" {
+  name                 = "default"
+  resource_group_name  = azurerm_resource_group.rg11.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.11.0.0/24"]
 }
 
-# 4. Container App (Застосунок my-app)
-resource "azurerm_container_app" "app" {
-  name                         = "my-app"
-  container_app_environment_id = azurerm_container_app_environment.env.id
-  resource_group_name          = azurerm_resource_group.rg9c.name
-  revision_mode                = "Single"
+resource "azurerm_network_interface" "nic" {
+  name                = "az104-11-nic"
+  location            = azurerm_resource_group.rg11.location
+  resource_group_name = azurerm_resource_group.rg11.name
 
-  template {
-    container {
-      name   = "hello-world-container"
-      image  = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
-      cpu    = 0.25
-      memory = "0.5Gi"
-    }
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+# Task 4: Закоментовано для імітації видалення та перевірки Alert
+/*
+resource "azurerm_windows_virtual_machine" "vm" {
+  name                = "az104-11-vm0"
+  resource_group_name = azurerm_resource_group.rg11.name
+  location            = azurerm_resource_group.rg11.location
+  size                = "Standard_D2as_v5"
+  admin_username      = "localadmin"
+  admin_password      = "MyP@ssw0rd!2024"
+
+  network_interface_ids = [azurerm_network_interface.nic.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "StandardSSD_LRS"
   }
 
-  ingress {
-    allow_insecure_connections = false
-    external_enabled           = true
-    target_port                = 80
-    traffic_weight {
-      percentage      = 100
-      latest_revision = true
-    }
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2022-datacenter-azure-edition"
+    version   = "latest"
+  }
+}
+
+resource "azurerm_virtual_machine_extension" "da" {
+  name                       = "DependencyAgentWindows"
+  virtual_machine_id         = azurerm_windows_virtual_machine.vm.id
+  publisher                  = "Microsoft.Azure.Monitoring.DependencyAgent"
+  type                       = "DependencyAgentWindows"
+  type_handler_version       = "9.10"
+  auto_upgrade_minor_version = true
+}
+*/
+
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "law-az104-11"
+  location            = azurerm_resource_group.rg11.location
+  resource_group_name = azurerm_resource_group.rg11.name
+  sku                 = "PerGB2018"
+}
+
+# Task 3
+resource "azurerm_monitor_action_group" "alert_ops" {
+  name                = "Alert the operations team"
+  resource_group_name = azurerm_resource_group.rg11.name
+  short_name          = "AlertopsTeam"
+
+  email_receiver {
+    name                    = "VM was deleted"
+    email_address           = "твій_email@приклад.com" 
+    use_common_alert_schema = true
+  }
+}
+
+# Task 2
+resource "azurerm_monitor_activity_log_alert" "vm_delete_alert" {
+  name                = "VM was deleted"
+  resource_group_name = azurerm_resource_group.rg11.name
+  scopes              = ["/subscriptions/${data.azurerm_subscription.current.subscription_id}"]
+  description         = "A VM in your resource group was deleted"
+
+  criteria {
+    operation_name = "Microsoft.Compute/virtualMachines/delete"
+    category       = "Administrative"
+    level          = "Informational"
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alert_ops.id
+  }
+}
+
+data "azurerm_subscription" "current" {}
+
+# Task 5: Правило обробки сповіщень для пригнічення під час обслуговування
+resource "azurerm_monitor_alert_processing_rule_suppression" "maintenance_window" {
+  name                = "Planned-Maintenance"
+  resource_group_name = azurerm_resource_group.rg11.name
+  
+  scopes              = [azurerm_resource_group.rg11.id]
+
+  description         = "Suppress notifications during planned maintenance."
+
+  schedule {
+    effective_from  = "2026-04-15T22:00:00" 
+    effective_until = "2026-04-16T07:00:00" 
+    time_zone       = "FLE Standard Time"   
   }
 }
