@@ -1,51 +1,139 @@
-# Task 1: Create and configure an Azure Container App and environment
-
-# 1. Ресурсна група (якщо ти її видалила, вона створиться заново)
-resource "azurerm_resource_group" "rg9c" {
-  name     = "az104-rg9"
-  location = "East US"
+# --- Допоміжні ресурси ---
+resource "random_id" "sa_id" {
+  byte_length = 4
 }
 
-# 2. Log Analytics Workspace (необхідний для моніторингу середовища)
-resource "azurerm_log_analytics_workspace" "law" {
-  name                = "viktoriia-law"
-  location            = azurerm_resource_group.rg9c.location
-  resource_group_name = azurerm_resource_group.rg9c.name
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
+# --- Task 1: Основна інфраструктура (Region 1) ---
+resource "azurerm_resource_group" "rg_region1" {
+  name     = "az104-rg-region1"
+  location = "West Europe"
 }
 
-# 3. Container App Environment (Середовище my-environment)
-resource "azurerm_container_app_environment" "env" {
-  name                       = "my-environment"
-  location                   = azurerm_resource_group.rg9c.location
-  resource_group_name        = azurerm_resource_group.rg9c.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+resource "azurerm_virtual_network" "vnet1" {
+  name                = "az104-10-vnet1"
+  address_space       = ["10.10.0.0/16"]
+  location            = azurerm_resource_group.rg_region1.location
+  resource_group_name = azurerm_resource_group.rg_region1.name
 }
 
-# 4. Container App (Застосунок my-app)
-resource "azurerm_container_app" "app" {
-  name                         = "my-app"
-  container_app_environment_id = azurerm_container_app_environment.env.id
-  resource_group_name          = azurerm_resource_group.rg9c.name
-  revision_mode                = "Single"
+resource "azurerm_subnet" "subnet" {
+  name                 = "default"
+  resource_group_name  = azurerm_resource_group.rg_region1.name
+  virtual_network_name = azurerm_virtual_network.vnet1.name
+  address_prefixes     = ["10.10.0.0/24"]
+  depends_on           = [azurerm_virtual_network.vnet1]
+}
 
-  template {
-    container {
-      name   = "hello-world-container"
-      image  = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
-      cpu    = 0.25
-      memory = "0.5Gi"
-    }
+resource "azurerm_network_interface" "nic" {
+  name                = "az104-10-nic"
+  location            = azurerm_resource_group.rg_region1.location
+  resource_group_name = azurerm_resource_group.rg_region1.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+  }
+  depends_on = [azurerm_subnet.subnet]
+}
+
+resource "azurerm_windows_virtual_machine" "vm0" {
+  name                = "az104-10-vm0"
+  resource_group_name = azurerm_resource_group.rg_region1.name
+  location            = azurerm_resource_group.rg_region1.location
+  size                = "Standard_D2s_v3"
+  admin_username      = "localadmin"
+  admin_password      = "Pa55w.rd1234!" 
+
+  network_interface_ids = [azurerm_network_interface.nic.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
   }
 
-  ingress {
-    allow_insecure_connections = false
-    external_enabled           = true
-    target_port                = 80
-    traffic_weight {
-      percentage      = 100
-      latest_revision = true
-    }
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2019-Datacenter"
+    version   = "latest"
   }
+}
+
+# --- Task 2: Recovery Services Vault (Region 1) ---
+resource "azurerm_recovery_services_vault" "vault" {
+  name                = "az104-rsv-region1"
+  location            = azurerm_resource_group.rg_region1.location
+  resource_group_name = azurerm_resource_group.rg_region1.name
+  sku                 = "Standard"
+  storage_mode_type   = "GeoRedundant"
+  soft_delete_enabled = true
+}
+
+# --- Task 3: Backup Policy & VM Protection ---
+resource "azurerm_backup_policy_vm" "policy" {
+  name                = "az104-backup"
+  resource_group_name = azurerm_resource_group.rg_region1.name
+  recovery_vault_name = azurerm_recovery_services_vault.vault.name
+  timezone            = "FLE Standard Time" 
+
+  backup {
+    frequency = "Daily" 
+    time      = "00:00" 
+  }
+
+  retention_daily {
+    count = 30 
+  }
+
+  instant_restore_retention_days = 2 
+}
+
+resource "azurerm_backup_protected_vm" "vm_backup" {
+  resource_group_name = azurerm_resource_group.rg_region1.name
+  recovery_vault_name = azurerm_recovery_services_vault.vault.name
+  source_vm_id        = azurerm_windows_virtual_machine.vm0.id
+  backup_policy_id    = azurerm_backup_policy_vm.policy.id
+}
+
+# --- Task 4: Monitoring (Storage Account & Diagnostics) ---
+resource "azurerm_storage_account" "sa_logs" {
+  name                     = "viklogs${random_id.sa_id.hex}" 
+  resource_group_name      = azurerm_resource_group.rg_region1.name
+  location                 = azurerm_resource_group.rg_region1.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+resource "azurerm_monitor_diagnostic_setting" "vault_diagnostics" {
+  name               = "Logs and Metrics to storage"
+  target_resource_id = azurerm_recovery_services_vault.vault.id
+  storage_account_id = azurerm_storage_account.sa_logs.id
+
+  # Використовуємо Resource Specific категорії
+  enabled_log { category = "CoreAzureBackup" }
+  enabled_log { category = "AddonAzureBackupJobs" }
+  enabled_log { category = "AddonAzureBackupAlerts" }
+  enabled_log { category = "AddonAzureBackupPolicy" }
+  enabled_log { category = "AddonAzureBackupStorage" }
+  enabled_log { category = "AzureSiteRecoveryJobs" }
+  enabled_log { category = "AzureSiteRecoveryEvents" }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
+}
+
+# --- Task 5: Disaster Recovery (Region 2) ---
+resource "azurerm_resource_group" "rg_region2" {
+  name     = "az104-rg-region2"
+  location = "North Europe"
+}
+
+resource "azurerm_recovery_services_vault" "vault_region2" {
+  name                = "az104-rsv-region2"
+  location            = azurerm_resource_group.rg_region2.location
+  resource_group_name = azurerm_resource_group.rg_region2.name
+  sku                 = "Standard"
 }
