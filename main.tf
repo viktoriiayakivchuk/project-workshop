@@ -1,9 +1,4 @@
-provider "azurerm" {
-  features {}
-}
-
 # --- Task 1: Resource Group & Core Networking ---
-
 resource "azurerm_resource_group" "rg" {
   name     = "az104-rg4"
   location = "East US"
@@ -27,7 +22,6 @@ resource "azurerm_virtual_network" "core_vnet" {
 }
 
 # --- Task 2: Manufacturing Networking ---
-
 resource "azurerm_virtual_network" "mfg_vnet" {
   name                = "ManufacturingVnet"
   address_space       = ["10.30.0.0/16"]
@@ -46,7 +40,6 @@ resource "azurerm_virtual_network" "mfg_vnet" {
 }
 
 # --- Task 3: Security (ASG & NSG) ---
-
 resource "azurerm_application_security_group" "asg_web" {
   name                = "asg-web"
   location            = azurerm_resource_group.rg.location
@@ -83,14 +76,12 @@ resource "azurerm_network_security_group" "nsg" {
   }
 }
 
-# Окремий ресурс для асоціації NSG з підмережею (згідно з кроком 4 Task 3)
 resource "azurerm_subnet_network_security_group_association" "core_nsg_assoc" {
-  subnet_id                 = "${azurerm_virtual_network.core_vnet.id}/subnets/SharedServicesSubnet"
+  subnet_id                 = tolist(azurerm_virtual_network.core_vnet.subnet)[0].id
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
 # --- Task 4: DNS Zones ---
-
 resource "azurerm_dns_zone" "public" {
   name                = "contoso.com"
   resource_group_name = azurerm_resource_group.rg.name
