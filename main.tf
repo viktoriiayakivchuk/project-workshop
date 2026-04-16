@@ -1,11 +1,7 @@
-provider "azurerm" {
-  features {}
-}
-
 # Task 1: Core Services Infrastructure
 resource "azurerm_resource_group" "rg5" {
   name     = "az104-rg5"
-  location = "West Europe" # Змінено регіон для уникнення помилки SKU
+  location = "West Europe" 
 }
 
 resource "azurerm_virtual_network" "core_vnet" {
