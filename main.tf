@@ -1,19 +1,6 @@
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.0" 
-    }
-  }
-}
-
-provider "azurerm" {
-  features {}
-}
-
 resource "azurerm_resource_group" "rg6" {
   name     = "az104-rg6"
-  location = "North Europe" # Змінено для кращої доступності SKU
+  location = "North Europe" 
 }
 
 # Task 1: Provision an infrastructure - Virtual Network
