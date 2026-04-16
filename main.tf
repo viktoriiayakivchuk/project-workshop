@@ -1,12 +1,10 @@
 # Task 1: Create and configure an Azure Container App and environment
-
-# 1. Ресурсна група (якщо ти її видалила, вона створиться заново)
 resource "azurerm_resource_group" "rg9c" {
   name     = "az104-rg9"
   location = "East US"
 }
 
-# 2. Log Analytics Workspace (необхідний для моніторингу середовища)
+# 2. Log Analytics Workspace 
 resource "azurerm_log_analytics_workspace" "law" {
   name                = "viktoriia-law"
   location            = azurerm_resource_group.rg9c.location
@@ -15,7 +13,6 @@ resource "azurerm_log_analytics_workspace" "law" {
   retention_in_days   = 30
 }
 
-# 3. Container App Environment (Середовище my-environment)
 resource "azurerm_container_app_environment" "env" {
   name                       = "my-environment"
   location                   = azurerm_resource_group.rg9c.location
@@ -23,7 +20,6 @@ resource "azurerm_container_app_environment" "env" {
   log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
 }
 
-# 4. Container App (Застосунок my-app)
 resource "azurerm_container_app" "app" {
   name                         = "my-app"
   container_app_environment_id = azurerm_container_app_environment.env.id
